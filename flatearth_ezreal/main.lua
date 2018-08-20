@@ -12,6 +12,8 @@ local menu = menu("FlatEarthEzreal", "FlatEarth Ezreal");
 menu:menu("q", "Q Settings")
 menu.q:keybind("laneClear", "Lane Clear Q", nil, "K")
 menu.q:keybind("jungleClear", "Jungle Clear Q", nil, "J")
+menu.q:keybind("stackTear", "Auto Stack Tear", nil, "C")
+menu.q:slider('stackManaPercent', "Min Mana % Stack Tear", 75, 0, 100, 1);
 
 menu:menu("r", "R Settings");
 	menu.r:keybind("ult", "Manual R", "T", nil)
@@ -24,6 +26,11 @@ ts.load_to_menu();
 ----------------
 
 local spells = {};
+
+spells.auto = { 
+	delay = 0.2468; 
+	speed = 2000; 
+}
 
 spells.q = { 
 	delay = 0.25; 
@@ -128,13 +135,39 @@ local function useQMinions()
               local timeToHit = distToMinion / spells.q.speed
               local compareHealth = orb.farm.predict_hp(minion, timeToHit);
               if (compareHealth < q_damage_to_minion(minion)) then
-                local pos = pred.linear.get_prediction(spells.q, minion)
-                if pos and pos.startPos:dist(pos.endPos) < spells.q.range then
-                  player:castSpell("pos", 0, vec3(pos.endPos.x, mousePos.y, pos.endPos.y))
-                end
+--                local pos = pred.linear.get_prediction(spells.q, minion)
+--                if pos and pos.startPos:dist(pos.endPos) < spells.q.range then
+--                  player:castSpell("pos", 0, vec3(pos.endPos.x, mousePos.y, pos.endPos.y))
+--                end
+                  local qpred = pred.linear.get_prediction(spells.q, minion)
+
+                  if not pred.collision.get_prediction(spells.q, qpred, minion) then
+                    player:castSpell("pos", 0, vec3(qpred.endPos.x, game.mousePos.y, qpred.endPos.y))
+                  end
               end
       end
     end
+end
+
+local function findClosestEnemyDistance()
+  local closestEnemyDist = nil;
+  local enemies = objManager.enemies;
+  print(objManager.enemies_n);
+  
+  for i = 0, objManager.enemies_n - 1 do
+    local enemy = enemies[i];
+    local distToEnemy= player.pos:dist(enemy.pos);
+    
+    if (not closestEnemyDist) then
+      closestEnemyDist = distToEnemy; -- first minion
+    end
+    if (distToEnemy < closestEnemyDist) then
+      closestEnemyDist = distToEnemy;
+    end
+  end
+  
+  --print('returning ' + closestMinion)
+  return closestEnemyDist;
 end
 
 local function findClosestJungleMinion()
@@ -205,42 +238,60 @@ end
 -- Hooks --
 -----------
 
-local executingLaneClearQ = false;
+local function useQOnMinionAfterAA()
+  local enemyMinions = objManager.minions[TEAM_ENEMY];
 
-local function myfunction()
+  for i = 0, objManager.minions.size[TEAM_ENEMY] - 1 do
+    local minion = enemyMinions[i];
+    local distToMinion= player.pos:dist(minion.pos);
+      if (player:spellSlot(0).state == 0 and
+        not 
+          (lastMinionAutoed == minion 
+            and lastMinionHealthAfterAuto < 20
+          ) 
+      and distToMinion < player.attackRange 
+      and not minion.isDead 
+      and minion.health 
+      and minion.health > 0 
+      and minion.isVisible) then
+      
+      local timeToHit = distToMinion / spells.q.speed
+      local healthAtPointOfImpact = orb.farm.predict_hp(minion, timeToHit);
+--      if (healthAtPointOfImpact > q_damage_to_minion(minion) * 1.5) then
+      if (true) then
+        local qpred = pred.linear.get_prediction(spells.q, minion)
 
-  if not menu.q.laneClear:get() then return end;
-  if (executingLaneClearQ) then return end;
-  executingLaneClearQ = true;
-    local enemyMinions = objManager.minions[TEAM_ENEMY];
-  
-    for i = 0, objManager.minions.size[TEAM_ENEMY] - 1 do
-      local minion = enemyMinions[i];
-      local distToMinion= player.pos:dist(minion.pos);
-      if (not minion == lastMinionAttacked and distToMinion < spells.q.range 
-            and not minion.isDead 
-            and minion.health 
-            and minion.health > 0 
-            and minion.isVisible) then
-              local timeToHit = distToMinion / spells.q.speed
-              local compareHealth = orb.farm.predict_hp(minion, timeToHit);
-              if (compareHealth < q_damage_to_minion(minion)) then
-                local pos = pred.linear.get_prediction(spells.q, minion)
-                if pos and pos.startPos:dist(pos.endPos) < spells.q.range then
-                  player:castSpell("pos", 0, vec3(pos.endPos.x, mousePos.y, pos.endPos.y))
-                end
-              end
+        if not pred.collision.get_prediction(spells.q, qpred, minion) then
+          player:castSpell("pos", 0, vec3(qpred.endPos.x, game.mousePos.y, qpred.endPos.y))
+        end
       end
     end
-  
-  executingLaneClearQ = false;
+  end
 end
 
-local lastMinionAttacked = nil;
+local casted_q = false; -- toggle for casting q, to make sure it doesn't get casted every AA
+local function after_aa()
+	if not menu.q.laneClear:get() or not orb.menu.lane_clear.key:get() then return end;
+	if player:spellSlot(0).state ~= 0 then return end
+
+	casted_q = not casted_q
+	if casted_q then
+		useQOnMinionAfterAA();
+		--orb.core.reset()
+	end
+	orb.combat.set_invoke_after_attack(false)
+end
+
+local lastMinionAutoed;
+local lastMinionHealthAfterAuto = nil;
 
 cb.add(cb.spell, function(spell)
   if(spell.owner == player and spell.isBasicAttack) then
-    lastMinionAttacked = spell.target
+    lastMinionAutoed = spell.target;
+    local timeToHit = player.pos:dist(lastMinionAutoed.pos) / spells.auto.speed
+    local healthAtPointOfImpact = orb.farm.predict_hp(lastMinionAutoed, timeToHit);
+    lastMinionHealthAfterAuto = healthAtPointOfImpact - CalculatePhysicalDamage(lastMinionAutoed, getTotalAD());
+    --print(lastMinionHealthAfterAuto);
   end
 --  if(spell.owner == player) then
 --    print(spell.name);
@@ -253,24 +304,71 @@ end)
 
 -- Called pre tick
 
+-- Target selector function
+
+local function select_target(res, obj, dist)
+	if dist > 1000 then return end
+	
+	res.obj = obj
+	return true
+end
+
+-- Return current target
+
+local function get_target()
+	return ts.get_result(select_target).obj
+end
+
+local function mana_pct()
+	return player.mana / player.maxMana * 100
+end
+
+local function doTear()
+  if (not menu.q.stackTear:get()) then return end;
+  if (mana_pct() < menu.q.stackManaPercent:get()) then return end;
+  
+  for i = 6, 11 do
+    local item = player:spellSlot(i).name
+      if item and (string.find(item, "Tear") or string.find(item, "Manamune")) then
+        if (player:spellSlot(0).state == 0 and not orb.menu.lane_clear.key:get() and not orb.menu.combat.key:get()) then
+          local closest = findClosestEnemyDistance();
+          if (closest== nil or closest < 2000) then
+            player:castSpell("pos", 0, vec3(player.pos.x, game.mousePos.y, player.pos.y))
+          end
+        end
+      end
+  end
+end
+
 local function ontick()
+  local target = get_target();
+	if not target then casted_q = false return end -- if no target found then reset e toggle
 	if orb.menu.lane_clear.key:get() then
 		useQMinions()
     useQJungle()
 	end
+  --doTear();
   
   manual_ult()
 end
 
 local function ondraw()
+  doTear();
 	local pos = graphics.world_to_screen(player.pos);
 	if menu.q.laneClear:get() then 
 		graphics.draw_text_2D("Spell Lane Clear", 14, pos.x - 50, pos.y + 50, graphics.argb(255,255,255,255))
+	end
+  
+  if menu.q.jungleClear:get() then 
     graphics.draw_text_2D("Spell Jungle Clear", 14, pos.x - 50, pos.y + 60, graphics.argb(255,255,255,255))
+	end
+  
+  if menu.q.stackTear:get() then 
+    graphics.draw_text_2D("Auto Tear Stack", 14, pos.x - 50, pos.y + 70, graphics.argb(255,255,255,255))
 	end
 end
 
 cb.add(cb.draw, ondraw)
-orb.combat.register_f_pre_tick(ontick)
-orb.combat.set_invoke_after_attack(true)
-orb.combat.register_f_after_attack(myfunction)
+cb.add(cb.tick, ontick)
+--orb.combat.register_f_pre_tick(ontick)
+orb.combat.register_f_after_attack(after_aa)
