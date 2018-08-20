@@ -16,8 +16,8 @@ menu.q:keybind("stackTear", "Auto Stack Tear", nil, "C")
 menu.q:slider('stackManaPercent', "Min Mana % Stack Tear", 75, 0, 100, 1);
 
 menu:menu("r", "R Settings");
-	menu.r:keybind("ult", "Manual R", "T", nil)
-	menu.r:slider('range', "Max manual ult range", 2000, 0, 5000, 5);
+	menu.r:keybind("ult", "Manual R near mouse", "T", nil)
+	menu.r:slider('range', "Max manual ult range", 4000, 0, 5000, 5);
 
 ts.load_to_menu();
 
@@ -149,10 +149,29 @@ local function useQMinions()
     end
 end
 
+local function findClosestEnemyToMouse()
+  local closestEnemy = nil;
+  local enemies = objManager.enemies;
+  
+  for i = 0, objManager.enemies_n - 1 do
+    local enemy = enemies[i];
+    local distToEnemy= game.mousePos:dist(enemy.pos);
+    
+    if (not closestEnemy) then
+      closestEnemy = enemy; -- first minion
+    end
+    if (enemy.isVisible and distToEnemy < game.mousePos:dist(closestEnemy.pos)) then
+      closestEnemy = enemy;
+    end
+  end
+  
+  --print('returning ' + closestMinion)
+  return closestEnemy;
+end
+
 local function findClosestEnemyDistance()
   local closestEnemyDist = nil;
   local enemies = objManager.enemies;
-  print(objManager.enemies_n);
   
   for i = 0, objManager.enemies_n - 1 do
     local enemy = enemies[i];
@@ -222,7 +241,7 @@ local function manual_ult()
 
   player:move(game.mousePos);
 
-  local target = get_target(ult_target);
+  local target = findClosestEnemyToMouse();
   if not target then return end
 
   local dist = player.pos:dist(target);
@@ -329,7 +348,7 @@ local function doTear()
   
   for i = 6, 11 do
     local item = player:spellSlot(i).name
-      if item and (string.find(item, "Tear") or string.find(item, "Manamune")) then
+      if item and (string.find(item, "Tear") or string.find(item, "Manamune") or string.find(item, "ArchAngels")) then
         if (player:spellSlot(0).state == 0 and not orb.menu.lane_clear.key:get() and not orb.menu.combat.key:get()) then
           local closest = findClosestEnemyDistance();
           if (closest== nil or closest > 2000) then
@@ -342,7 +361,7 @@ end
 
 local function ontick()
   local target = get_target();
-	if not target then casted_q = false return end -- if no target found then reset e toggle
+	if not target then casted_q = false end -- if no target found then reset e toggle
 	if orb.menu.lane_clear.key:get() then
 		useQMinions()
     useQJungle()
@@ -365,6 +384,10 @@ local function ondraw()
   
   if menu.q.stackTear:get() then 
     graphics.draw_text_2D("Auto Tear Stack", 14, pos.x - 50, pos.y + 70, graphics.argb(255,255,255,255))
+	end
+  
+  if menu.r.ult:get() then 
+    graphics.draw_text_2D("Manual Ult Key", 14, pos.x - 50, pos.y + 80, graphics.argb(255,255,255,255))
 	end
 end
 
