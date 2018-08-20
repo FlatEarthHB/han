@@ -332,7 +332,7 @@ local function doTear()
       if item and (string.find(item, "Tear") or string.find(item, "Manamune")) then
         if (player:spellSlot(0).state == 0 and not orb.menu.lane_clear.key:get() and not orb.menu.combat.key:get()) then
           local closest = findClosestEnemyDistance();
-          if (closest== nil or closest < 2000) then
+          if (closest== nil or closest > 2000) then
             player:castSpell("pos", 0, vec3(player.pos.x, game.mousePos.y, player.pos.y))
           end
         end
