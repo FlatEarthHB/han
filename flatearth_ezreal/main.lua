@@ -48,7 +48,7 @@ spells.r = {
 	width = 160;
 	speed = 2000; 
 	boundingRadiusMod = 1; 
-	collision = { hero = true, minion = false }; 
+	collision = { hero = false, minion = false }; 
 }
 
 local function ult_target(res, obj, dist)
@@ -256,68 +256,78 @@ end
 -----------
 -- Hooks --
 -----------
+local lastMinionAutoed = nil;
+local lastMinionHealthAfterAuto = nil;
 
-local function useQOnMinionAfterAA()
+local function tryToQMinionAAReset()
   local enemyMinions = objManager.minions[TEAM_ENEMY];
+  local fallbackMinion = nil;
+  local fallbackQpred = nil;
 
   for i = 0, objManager.minions.size[TEAM_ENEMY] - 1 do
     local minion = enemyMinions[i];
+
     local distToMinion= player.pos:dist(minion.pos);
-      if (player:spellSlot(0).state == 0 and
-        not 
-          (lastMinionAutoed == minion 
-            and lastMinionHealthAfterAuto < 20
-          ) 
-      and distToMinion < player.attackRange 
+    if (player:spellSlot(0).state == 0 and
+      not 
+      (lastMinionAutoed ~= nil and 
+        lastMinionAutoed == minion 
+        and lastMinionHealthAfterAuto < 20
+      )
+      and distToMinion < spells.q.range
       and not minion.isDead 
       and minion.health 
       and minion.health > 0 
       and minion.isVisible) then
-      
-      local timeToHit = distToMinion / spells.q.speed
-      local healthAtPointOfImpact = orb.farm.predict_hp(minion, timeToHit);
---      if (healthAtPointOfImpact > q_damage_to_minion(minion) * 1.5) then
-      if (true) then
-        local qpred = pred.linear.get_prediction(spells.q, minion)
 
-        if not pred.collision.get_prediction(spells.q, qpred, minion) then
-          player:castSpell("pos", 0, vec3(qpred.endPos.x, game.mousePos.y, qpred.endPos.y))
+      local qpred = pred.linear.get_prediction(spells.q, minion)
+
+      if not pred.collision.get_prediction(spells.q, qpred, minion) then
+        if (minion.health < q_damage_to_minion(minion)) then
+          player:castSpell("pos", 0, vec3(qpred.endPos.x, 0, qpred.endPos.y))
+          return;
         end
+        fallbackMinion = minion;
+        fallbackQpred = qpred;
       end
     end
   end
+  
+  if (fallbackMinion) then
+    player:castSpell("pos", 0, vec3(fallbackQpred.endPos.x, 0, fallbackQpred.endPos.y))
+  end
 end
 
-local casted_q = false; -- toggle for casting q, to make sure it doesn't get casted every AA
 local function after_aa()
 	if not menu.q.laneClear:get() or not orb.menu.lane_clear.key:get() then return end;
 	if player:spellSlot(0).state ~= 0 then return end
 
-	casted_q = not casted_q
-	if casted_q then
-		useQOnMinionAfterAA();
-		--orb.core.reset()
-	end
+  tryToQMinionAAReset();
+  useQJungle();
 	orb.combat.set_invoke_after_attack(false)
 end
 
-local lastMinionAutoed;
-local lastMinionHealthAfterAuto = nil;
+
 
 cb.add(cb.spell, function(spell)
-  if(spell.owner == player and spell.isBasicAttack) then
+  if(spell.owner == player and spell.isBasicAttack and spell.target.name and string.find(spell.target.name, "Minion")) then
+    print("auto detected");
     lastMinionAutoed = spell.target;
+    print(spell.target.name);
+    print(spell.target.type);
     local timeToHit = player.pos:dist(lastMinionAutoed.pos) / spells.auto.speed
     local healthAtPointOfImpact = orb.farm.predict_hp(lastMinionAutoed, timeToHit);
     lastMinionHealthAfterAuto = healthAtPointOfImpact - CalculatePhysicalDamage(lastMinionAutoed, getTotalAD());
+    
     --print(lastMinionHealthAfterAuto);
   end
 --  if(spell.owner == player) then
 --    print(spell.name);
 --    print(spell.static.missileSpeed)
---		print(spell.static.lineWidth)
+--    print(spell.static.lineWidth)
 --    print(spell.windUpTime)
---		print(spell.animationTime)
+--    print(spell.animationTime)
+--    print(spell.isBasicAttack)
 --  end
 end)
 
@@ -351,20 +361,29 @@ local function doTear()
       if item and (string.find(item, "Tear") or string.find(item, "Manamune") or string.find(item, "ArchAngels")) then
         if (player:spellSlot(0).state == 0 and not orb.menu.lane_clear.key:get() and not orb.menu.combat.key:get()) then
           local closest = findClosestEnemyDistance();
-          if (closest== nil or closest > 2000) then
-            player:castSpell("pos", 0, vec3(player.pos.x, game.mousePos.y, player.pos.y))
+--          if (closest ~= nil and closest < 2000) then
+--            print('skipping because of close enemy');
+--          end
+          if (closest == nil or closest > 2000) then
+            player:castSpell("pos", 0, vec3(player.pos.x, 0, player.pos.y))
+            return;
           end
         end
       end
   end
 end
 
+local last_target = nil;
+
 local function ontick()
-  local target = get_target();
-	if not target then casted_q = false end -- if no target found then reset e toggle
+--  local target = get_target();
+--  if (last_target ~= target) then
+--    print('target changed to');
+--    print(target.name);
+--  end
+--	if not target then casted_q = false end -- if no target found then reset e toggle
 	if orb.menu.lane_clear.key:get() then
 		useQMinions()
-    useQJungle()
 	end
   --doTear();
   
