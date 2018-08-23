@@ -365,7 +365,7 @@ local function doTear()
 --            print('skipping because of close enemy');
 --          end
           if (closest == nil or closest > 2000) then
-            player:castSpell("pos", 0, vec3(player.pos.x, 0, player.pos.y))
+            player:castSpell("pos", 0, player.pos)
             return;
           end
         end
@@ -408,6 +408,9 @@ local function ondraw()
   if menu.r.ult:get() then 
     graphics.draw_text_2D("Manual Ult Key", 14, pos.x - 50, pos.y + 80, graphics.argb(255,255,255,255))
 	end
+  
+--  graphics.draw_text_2D(tostring(player.pos.z), 14, pos.x + 100, pos.y + 100, graphics.argb(255,255,255,255))
+--  graphics.draw_text_2D(tostring(player.pos.x), 14, pos.x - 100, pos.y + 100, graphics.argb(255,255,255,255))
 end
 
 cb.add(cb.draw, ondraw)
