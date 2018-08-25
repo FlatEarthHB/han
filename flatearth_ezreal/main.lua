@@ -73,6 +73,13 @@ function CalculatePhysicalDamage(target, damage, damageSource)
 	return 0
 end
 
+-- Returns magic damage multiplier on @target from @damageSource or player
+function MagicReduction(target, damageSource)
+  local damageSource = damageSource or player
+  local magicResist = (target.spellBlock * damageSource.percentMagicPenetration) - damageSource.flatMagicPenetration
+  return magicResist >= 0 and (100 / (100 + magicResist)) or (2 - (100 / (100 - magicResist)))
+end
+
 -- Calculates magic damage on @target from @damageSource or player
 function CalculateMagicDamage(target, damage, damageSource)
 	local damageSource = damageSource or player
@@ -88,13 +95,6 @@ function PhysicalReduction(target, damageSource)
   local armor = ((target.bonusArmor * damageSource.percentBonusArmorPenetration) + (target.armor - target.bonusArmor)) * damageSource.percentArmorPenetration
   local lethality = (damageSource.physicalLethality * .4) + ((damageSource.physicalLethality * .6) * (damageSource.levelRef / 18))
   return armor >= 0 and (100 / (100 + (armor - lethality))) or (2 - (100 / (100 - (armor - lethality))))
-end
-
--- Returns magic damage multiplier on @target from @damageSource or player
-function MagicReduction(target, damageSource)
-	local damageSource = damageSource or player
-	local magicResist = (target.spellBlock * damageSource.percentMagicPenetration) - damageSource.flatMagicPenetration
-	return magicResist >= 0 and (100 / (100 + magicResist)) or (2 - (100 / (100 - magicResist)))
 end
 
 -- Returns total AD of @obj or player
@@ -128,6 +128,7 @@ local function useQMinions()
       local distToMinion= player.pos:dist(minion.pos);
       if (distToMinion < spells.q.range 
             and distToMinion > player.attackRange 
+            and string.find(minion.name, "Minion")
             and not minion.isDead 
             and minion.health 
             and minion.health > 0 
@@ -213,7 +214,7 @@ local function useQJungle()
   if not menu.q.jungleClear:get() then 
     return 
   end;
-  if not player:spellSlot(1).state == 0 then 
+  if not player:spellSlot(0).state == 0 then 
     return 
   end;
 
@@ -274,6 +275,7 @@ local function tryToQMinionAAReset()
         lastMinionAutoed == minion 
         and lastMinionHealthAfterAuto < 20
       )
+      and string.find(minion.name, "Minion")
       and distToMinion < spells.q.range
       and not minion.isDead 
       and minion.health 
@@ -311,10 +313,7 @@ end
 
 cb.add(cb.spell, function(spell)
   if(spell.owner == player and spell.isBasicAttack and spell.target.name and string.find(spell.target.name, "Minion")) then
-    print("auto detected");
     lastMinionAutoed = spell.target;
-    print(spell.target.name);
-    print(spell.target.type);
     local timeToHit = player.pos:dist(lastMinionAutoed.pos) / spells.auto.speed
     local healthAtPointOfImpact = orb.farm.predict_hp(lastMinionAutoed, timeToHit);
     lastMinionHealthAfterAuto = healthAtPointOfImpact - CalculatePhysicalDamage(lastMinionAutoed, getTotalAD());
@@ -415,5 +414,4 @@ end
 
 cb.add(cb.draw, ondraw)
 cb.add(cb.tick, ontick)
---orb.combat.register_f_pre_tick(ontick)
 orb.combat.register_f_after_attack(after_aa)

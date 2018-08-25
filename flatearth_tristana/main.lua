@@ -64,11 +64,26 @@ function DelayAction(func, delay, args) --delay in seconds
   end
 end
 
+-- Used by target selector, without pred
+
+function select_target(res, obj, dist)
+  if dist > 1000 then return end
+  
+  res.obj = obj
+  return true
+end
+
+-- Get target selector result
+
+local function get_target()
+  return ts.get_result(select_target).obj
+end
+
 function anyQableChampsInRange() 
   for i = 0, objManager.enemies_n - 1 do
     local enemy = objManager.enemies[i];
     if (not menu.qset.blacklist[enemy.name]:get() and
-          not enemy.isDead and
+          not enemy.isDead and enemy.isVisible and
           player.pos:dist(enemy.pos) < player.attackRange) then
             return true
     end
@@ -79,12 +94,19 @@ end
 
 local e_range = {525,533,541,549,557,565,573,581,589,597,605,613,621,629,637,645,653,661};
 function doE() 
+  local currERange = e_range[player.levelRef];
+
+  -- first try to e target 
+  local target = get_target();
+  if (target and target.type == 1 and player.pos:dist(target.pos) < currERange and not menu.eset.blacklist[target.name]:get()) then
+    player:castSpell("obj", 2, target)
+  end
+
+  -- otherwise just anyone
   for i = 0, objManager.enemies_n - 1 do
     local enemy = objManager.enemies[i];
     
     if (not menu.eset.blacklist[enemy.name]:get()) then
-      local currERange = e_range[player.levelRef];
-      
       if (player.pos:dist(enemy.pos) < currERange) then
         player:castSpell("obj", 2, enemy)
       end
@@ -99,7 +121,7 @@ function doR()
     local enemy = objManager.enemies[i];
     
     if (not menu.rset.blacklist[enemy.name]:get()) then
-      local currRRange = e_range[player.levelRef];
+      local currRRange = e_range[player.levelRef] + 200;
       
       if (player.pos:dist(enemy.pos) < currRRange and r_damage_to_champion(enemy) > enemy.health) then
         player:castSpell("obj", 3, enemy)
@@ -153,29 +175,22 @@ function CalculatePhysicalDamage(target, damage, damageSource)
 end
 
 local e_magic_scale = {50 , 75 , 100 ,125, 150};
-local e_physical_scale = {60 , 70 , 80 ,90 , 100};
-local e_physical_pct_scale = {.5 , .65 , .80 , .95 , 1.1};
+local max_e_physical_scale = {132, 154, 176, 198, 220};
+local max_e_bonus_ad_multiplier_scale = {1.10, 1.43, 1.76, 2.09, 2.42};
 function damageFromEForRCalc(unit)
   local totalDamageFromE = 0;
+  local enemyEStacks = get_e_stacks(unit);
 
-  if (enemyWithE == unit) then
-    local stacksAfterR = enemyEStacks + 1;
-    if (stacksAfterR > 4) then
-      stacksAfterR = 4;
-    end
+  if (enemyEStacks == 3) then -- so we're about to get the 4th stack if we use r
+      local baseMagicDmg = e_magic_scale[player:spellSlot(2).level] or 0;
+      local totalMagicDmg = baseMagicDmg + (.25 * getTotalAP())
 
-    local baseMagicDmg = e_magic_scale[player:spellSlot(2).level] or 0;
-    local totalMagicDmg = baseMagicDmg + (.25 * getTotalAP())
+      local physicalDmg = max_e_physical_scale[player:spellSlot(2).level] or 0;
+      local bonusAdMultiplier = max_e_bonus_ad_multiplier_scale[player:spellSlot(2).level] or 0;
+      local totalPhysicalDmg = physicalDmg + (bonusAdMultiplier * GetBonusAD()) + (1.1 * getTotalAP())
 
-    local basePhysicalDmg = e_physical_scale[player:spellSlot(2).level] or 0;
-    local basePhysicalPctDmg = e_physical_pct_scale[player:spellSlot(2).level] or 0;
-    local stackPct = stacksAfterR * .3;
-    local stackedPhysicalDmg = basePhysicalDmg + (basePhysicalDmg * stackPct);
-    local stackedPhysicalPctDmg = basePhysicalPctDmg + (basePhysicalPctDmg * stackPct);
-    local stackedApPct = .5 + (.5*stackPct)
-    local totalPhysicalDmg = stackedPhysicalDmg + (stackedPhysicalPctDmg * GetBonusAD()) + (stackedApPct * getTotalAP())
-
-    totalDamageFromE = CalculateMagicDamage(unit, totalMagicDmg) + CalculatePhysicalDamage(unit, totalPhysicalDmg);
+      totalDamageFromE = CalculateMagicDamage(unit, totalMagicDmg) + CalculatePhysicalDamage(unit, totalPhysicalDmg) - unit.physicalShield;
+      print("Damage from max stacked e: " .. tostring(totalDamageFromE));
   end
 
   return totalDamageFromE;
@@ -187,7 +202,7 @@ function r_damage_to_champion(unit)
   local totalMagicDmgFromR = CalculateMagicDamage(unit, baseMagicDmg + getTotalAP());
   
 	-- return totalMagicDmgFromR + damageFromEForRCalc(unit);
-  return totalMagicDmgFromR - unit.magicalShield;
+  return totalMagicDmgFromR - unit.magicalShield + damageFromEForRCalc(unit);
 end
 
 function useCombatQ() 
@@ -252,7 +267,27 @@ local function ondraw()
   -- end
 end
 
+function has_buff(unit, name)
+  for i = 0, unit.buffManager.count - 1 do
+      local buff = unit.buffManager:get(i)
+      if buff and buff.valid and string.lower(buff.name) == name then
+        if game.time <= buff.endTime then
+            return true, buff.stacks
+        end
+      end
+    end
+    return false, 0
+end
 
+-- Return W stacks
+
+function get_e_stacks(unit)
+  local buff, stacks = has_buff(unit, "tristanaecharge")
+  if buff then
+    return stacks;
+  end
+  return 0;
+end
 
 local function ontick()
   useCombatQ();
@@ -261,53 +296,35 @@ local function ontick()
 
   panicR();
 
-  -- if enemyWithE then
-  --   print(enemyWithE.name);
-  --   print(enemyEStacks);
-  -- end
-
-  -- if not enemyWithE then
-  --   print("noEnemyWithE");
-  -- end
-
   -- for i = 0, objManager.enemies_n - 1 do
   --   local enemy = objManager.enemies[i];
     
-  --   print(r_damage_to_champion(enemy));
+  --   for i = 0, enemy.buffManager.count - 1 do
+  --     local buff = enemy.buffManager:get(i)
+  --     if buff and buff.valid then
+  --       if game.time <= buff.endTime and buff.name == "tristanaecharge" then
+  --         print(buff.name);
+  --         print(buff.stacks);
+  --       end
+  --     end
+  --   end
   -- end
+  -- return false, 0
 end
+  -- end
 
 
 local function after_aa()
   -- useCombatE();
 end
 
-enemyWithE = nil;
-enemyEStacks = 0;
 
-function resetEnemyWithE()
-  enemyWithE = nil;
-  enemyEStacks = 0;
-end
-
-cb.add(cb.spell, function(spell)
-  -- if(string.find(spell.name, "TristanaE")) then
-  --   enemyWithE = spell.target;
-  --   DelayAction(resetEnemyWithE, 4 + spells.e.delay);
-  -- end
-
-  -- if (spell.owner == player and spell.isBasicAttack and spell.target == enemyWithE) then
-  --   enemyEStacks = enemyEStacks + 1;
-
-  --   if (enemyEStacks == 4) then
-  --     DelayAction(resetEnemyWithE, .25);
-  --   end
-  -- end
- -- if(spell.owner == player) then
- --   print(spell.name)
- --   print(spell.owner.charName);
- -- end
-end)
+-- cb.add(cb.spell, function(spell)
+--  -- if(spell.owner == player) then
+--  --   print(spell.name)
+--  --   print(spell.owner.charName);
+--  -- end
+-- end)
 
 --cb.add(cb.create_missile, function(missile)
 --  if missile.spell.owner == player then
